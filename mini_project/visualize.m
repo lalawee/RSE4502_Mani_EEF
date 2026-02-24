@@ -13,7 +13,7 @@ function visualize(robot, path, q_hist, qdot_hist, ee_hist, w_hist, lambda_hist,
 %   baseOffset  - [x, y] robot base offset from world origin (e.g. [0.8, 0])
 
 if nargin < 8
-    baseOffset = [0.8, 0.0];
+    baseOffset = [1.2, 0.0];
 end
 
 t       = path.t;
@@ -56,10 +56,10 @@ end
 sgtitle('Joint Velocities vs Time', 'FontSize', 14, 'FontWeight', 'bold');
 
 %% --- Figure 3: EE Tracking ---
-figure('Name', 'EE Tracking', 'Position', [150 50 1000 800]);
+figure('Name', 'EE Tracking', 'Position', [150 50 1200 800]);
 
 % 3D path
-subplot(2,2,[1,2]);
+subplot(2,3,[1,2]);
 plot3(ee_hist(1,:), ee_hist(2,:), ee_hist(3,:), 'b-', 'LineWidth', 2);
 hold on;
 plot3(path.pos(1,:), path.pos(2,:), path.pos(3,:), 'r--', 'LineWidth', 1.5);
@@ -74,15 +74,33 @@ legend('Actual EE', 'Desired Seam', 'Workpiece');
 view(35, 30);
 
 % X tracking
-subplot(2,2,3);
+subplot(2,3,3);
 plot(t, ee_hist(1,:), 'b-', 'LineWidth', 1.5); hold on;
 plot(t, path.pos(1,:), 'r--', 'LineWidth', 1.5);
 xlabel('Time (s)'); ylabel('X (m)');
 title('EE X vs Time');
 legend('Actual', 'Desired'); grid on;
 
+% Y tracking
+subplot(2,3,4);
+plot(t, ee_hist(2,:), 'b-', 'LineWidth', 1.5); hold on;
+plot(t, path.pos(2,:), 'r--', 'LineWidth', 1.5);
+xlabel('Time (s)'); ylabel('Y (m)');
+title('EE Y vs Time');
+legend('Actual', 'Desired'); grid on;
+
+% Z tracking
+subplot(2,3,5);
+
+plot(t, ee_hist(3,:), 'b-', 'LineWidth', 1.5); hold on;
+plot(t, path.pos(3,:), 'r--', 'LineWidth', 1.5);
+xlabel('Time (s)'); ylabel('Z (m)');
+title('EE Z vs Time');
+legend('Actual', 'Desired'); grid on;
+ylim([0.95, 1.05]);
+
 % Tracking error
-subplot(2,2,4);
+subplot(2,3,6);
 err = vecnorm(ee_hist - path.pos(:,1:N));
 plot(t, err * 1000, 'k-', 'LineWidth', 1.5);
 xlabel('Time (s)'); ylabel('Error (mm)');
@@ -115,7 +133,7 @@ figure('Name', '3D Animation', 'Position', [250 50 800 800], 'Color', 'w');
 ax = axes;
 view(35, 30); hold on; grid on; axis equal;
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
-title('Robot Arm Welding Simulation', 'FontSize', 14);
+title('JetArm Welding Simulation', 'FontSize', 14);
 
 % Static elements
 [Xc, Yc, Zc] = cylinder(0.5, 50);

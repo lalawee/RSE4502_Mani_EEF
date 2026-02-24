@@ -68,11 +68,11 @@ p_e = Transforms{n+1}(1:3, 4);
 J    = zeros(6, m);
 qIdx = 0;
 
-for i = 1:n
-    fprintf('Frame %d: z=[%.3f,%.3f,%.3f] p=[%.3f,%.3f,%.3f]\n', ...
-        i-1, Transforms{i}(1:3,3)', Transforms{i}(1:3,4)');
-end
-fprintf('EE: p=[%.3f,%.3f,%.3f]\n', p_e');
+%for i = 1:n
+%    fprintf('Frame %d: z=[%.3f,%.3f,%.3f] p=[%.3f,%.3f,%.3f]\n', ...
+%        i-1, Transforms{i}(1:3,3)', Transforms{i}(1:3,4)');
+%end
+%fprintf('EE: p=[%.3f,%.3f,%.3f]\n', p_e');
 
 for i = 1:n
     jt = upper(char(jointTypes{i}));
