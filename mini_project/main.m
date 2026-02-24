@@ -6,23 +6,21 @@
 clc; clear; close all;
 
 %% --- Configuration ---
-configStr  = 'JetArm';   % change to 'RRP' or 'RRR'
+configStr  = 'RRR';   % change to 'RRP' or 'RRR'
 baseOffset = [0.8, 0.0]; % robot base offset from cylinder center (world frame)
 
-%% --- Module 1: Build Robot ---
+%% --- Build Robot ---
 [robot, DH_table, jointTypes, jLimits] = buildConfig(configStr);
 nActive = sum(~strcmpi(jointTypes, 'F'));
 fprintf('Active joints: %d\n\n', nActive);
 
-%% --- Module 2: Workspace Analysis ---
-ws = analyzeWorkspace(robot, 'nSamples', 50000, 'baseOffset', baseOffset);
 
 %% --- Initial Configuration ---
 target = [0.5 - baseOffset(1); 0; 1.0];   % seam start in robot base frame
 [q, init_err, w_init] = findInitialConfig(robot, DH_table, jointTypes, jLimits, target);
 fprintf('Initial EE error: %.4fm | Manipulability: %.4f\n\n', init_err, w_init);
 
-%% --- Module 3: Define Welding Path ---
+%% --- Define Welding Path ---
 path = defineWeldPath('omega', 0.5, 'dt', 0.05, 'baseOffset', baseOffset(1));
 
 %% --- Main Loop ---
