@@ -115,7 +115,7 @@ figure('Name', '3D Animation', 'Position', [250 50 800 800], 'Color', 'w');
 ax = axes;
 view(35, 30); hold on; grid on; axis equal;
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
-title('JetArm Welding Simulation', 'FontSize', 14);
+title('Robot Arm Welding Simulation', 'FontSize', 14);
 
 % Static elements
 [Xc, Yc, Zc] = cylinder(0.5, 50);
