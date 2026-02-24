@@ -1,4 +1,4 @@
-function [robot, DH_table, jointTypes] = buildConfig(configStr)
+function [robot, DH_table, jointTypes, jLimits] = buildConfig(configStr)
 % buildConfig
 % Builds a robot model from a named configuration string.
 %
@@ -9,6 +9,7 @@ function [robot, DH_table, jointTypes] = buildConfig(configStr)
 %   robot      - rigidBodyTree object
 %   DH_table   - nx4 numeric matrix [alpha_deg, a_m, d_m, theta_offset_deg]
 %   jointTypes - nx1 cell array of 'R', 'P', or 'F'
+%   jLimits    - mx2 joint limits [min, max] for active joints only (m=non-fixed)
 %
 % DH Convention: Modified DH (Craig)
 
@@ -18,8 +19,7 @@ switch upper(configStr)
     case 'JETARM'
     % =====================================================================
     % Scaled JetArm 6x — PRRRRR + fixed tool frame
-    % Prismatic joint added for vertical lift
-    % Robot base at (0.8, 0) from cylinder center
+    % Prismatic joint for vertical lift + 5 revolute joints
 
     scale = 6;
     l0 = 0.10315 * scale;   % 0.619m - base height
@@ -42,31 +42,46 @@ switch upper(configStr)
          0,   0,   l4,   180,  'F';   % Fixed tool frame
     };
 
+    % Joint limits [min, max] for active joints only
+    % Order matches DH_cell active rows (non-fixed)
+    jLimits = [
+        0.5,   1.5;    % Joint 1: prismatic lift (m)
+       -pi,    pi;     % Joint 2: base yaw (rad)
+       -pi/2,  pi/2;   % Joint 3: shoulder pitch (rad)
+       -pi,    pi;     % Joint 4: elbow pitch (rad)
+       -pi/2,  pi/2;   % Joint 5: wrist pitch (rad)
+       -pi,    pi;     % Joint 6: wrist roll (rad)
+    ];
+
     % =====================================================================
     case 'RRP'
     % =====================================================================
-    % Simple 3-DOF robot: Revolute-Revolute-Prismatic
+    % Simple 3-DOF: Revolute-Revolute-Prismatic
     % Joint 1 (R): Base yaw about world Z
     % Joint 2 (R): Shoulder pitch
     % Joint 3 (P): Radial extension
-    % Robot base at (0.8, 0) from cylinder center
 
     d_base = 1.0;   % fixed base height (m)
 
     DH_cell = {
          0,   0,   d_base,  0,   'R';   % Joint 1: yaw
-        90,   0,   0,       0,   'R';   % Joint 2: pitch (z2 horizontal)
+        90,   0,   0,       0,   'R';   % Joint 2: pitch
          0,   0,   0,       0,   'P';   % Joint 3: prismatic extend
     };
+
+    jLimits = [
+       -pi,   pi;     % Joint 1: yaw (rad)
+       -pi/2, pi/2;   % Joint 2: pitch (rad)
+        0.1,  0.8;    % Joint 3: prismatic extend (m)
+    ];
 
     % =====================================================================
     case 'RRR'
     % =====================================================================
-    % Simple 3-DOF all-revolute robot
+    % Simple 3-DOF all-revolute
     % Joint 1 (R): Base yaw
     % Joint 2 (R): Shoulder pitch
     % Joint 3 (R): Elbow pitch
-    % Robot base at (0.8, 0) from cylinder center
 
     d_base = 0.3;
     L2     = 0.8;
@@ -79,6 +94,12 @@ switch upper(configStr)
          0,   L3,   0,       0,   'F';   % Fixed tool frame
     };
 
+    jLimits = [
+       -pi,   pi;     % Joint 1: yaw (rad)
+       -pi/2, pi/2;   % Joint 2: shoulder (rad)
+       -pi,   pi;     % Joint 3: elbow (rad)
+    ];
+
     % =====================================================================
     otherwise
         error('Unknown config "%s". Available: JetArm, RRP, RRR', configStr);
@@ -88,6 +109,16 @@ end
 robot      = buildRobotFromDH(DH_cell, configStr);
 jointTypes = DH_cell(:, 5);
 DH_table   = cell2mat(DH_cell(:, 1:4));
+
+% Apply joint limits to robot bodies
+activeIdx = 0;
+for i = 1:length(robot.Bodies)
+    jt = robot.Bodies{i}.Joint.Type;
+    if ~strcmp(jt, 'fixed')
+        activeIdx = activeIdx + 1;
+        robot.Bodies{i}.Joint.PositionLimits = jLimits(activeIdx, :);
+    end
+end
 
 fprintf('Built robot: %s (%d bodies, %d active joints)\n', ...
         configStr, size(DH_table,1), sum(~strcmpi(jointTypes,'F')));
