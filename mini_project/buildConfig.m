@@ -16,6 +16,41 @@ function [robot, DH_table, jointTypes, jLimits] = buildConfig(configStr)
 switch upper(configStr)
 
     % =====================================================================
+    case 'JETARM_NOPRIS'
+    % =====================================================================
+    % Scaled JetArm 6x — RRRRR + fixed tool frame
+    % Original configuration without prismatic joint
+    
+    scale = 6;
+    l0 = 0.10315 * scale;
+    l1 = 0.12942 * scale;
+    l2 = 0.12942 * scale;
+    l3 = 0.05945 * scale;
+    l4 = 0.02545 * scale;
+    
+    fprintf('JetArm (no prismatic) scaled %dx link lengths:\n', scale);
+    fprintf('  l0=%.3fm, l1=%.3fm, l2=%.3fm, l3=%.3fm, l4=%.3fm\n\n', ...
+            l0, l1, l2, l3, l4);
+    
+    DH_cell = {
+         0,   0,    l0,   0,     'R';   % Joint 1: base yaw
+       -90,   0,    0,   -90,    'R';   % Joint 2: shoulder pitch
+         0,   l1,   0,    0,     'R';   % Joint 3: elbow pitch
+         0,   l2,   0,   -90,    'R';   % Joint 4: wrist pitch
+       -90,   0,    l3,   0,     'R';   % Joint 5: wrist roll
+         0,   0,    l4,   180,   'F';   % Fixed tool frame
+    };
+    
+    jLimits = [
+       -pi,    pi;     % Joint 1: base yaw
+       -pi/2,  pi/2;   % Joint 2: shoulder pitch
+       -pi,    pi;     % Joint 3: elbow pitch
+       -pi/2,  pi/2;   % Joint 4: wrist pitch
+       -pi,    pi;     % Joint 5: wrist roll
+    ];
+
+
+    % =====================================================================
     case 'JETARM'
     % =====================================================================
     % Scaled JetArm 6x — PRRRRR + fixed tool frame
