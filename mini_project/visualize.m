@@ -1,26 +1,39 @@
-function visualize(robot, path, q_hist, qdot_hist, ee_hist, w_hist, lambda_hist)
+function visualize(robot, path, q_hist, qdot_hist, ee_hist, w_hist, lambda_hist, baseOffset)
 % visualize
 % Generates all plots and animation for the welding simulation.
 %
 % Inputs:
 %   robot       - rigidBodyTree object
 %   path        - struct from defineWeldPath
-%   q_hist      - 5xN joint angles over time
-%   qdot_hist   - 5xN joint velocities over time
+%   q_hist      - 6xN joint angles over time
+%   qdot_hist   - 6xN joint velocities over time
 %   ee_hist     - 3xN EE positions over time
 %   w_hist      - 1xN manipulability index over time
 %   lambda_hist - 1xN damping values over time
+%   baseOffset  - [x, y] robot base offset from world origin (e.g. [0.8, 0])
 
-t  = path.t;
-N  = path.N;
+if nargin < 8
+    baseOffset = [0.8, 0.0];
+end
+
+t       = path.t;
+N       = path.N;
+nJoints = size(q_hist, 1);
+cyl_dx  = -baseOffset(1);   % cylinder X offset in robot base frame
 
 %% --- Figure 1: Joint Angles ---
 figure('Name', 'Joint Angles', 'Position', [50 50 1000 600]);
-jointLabels = {'q1 Base Yaw', 'q2 Shoulder', 'q3 Elbow', 'q4 Wrist Pitch', 'q5 Wrist Roll'};
-for j = 1:5
+jointLabels = {'q1 Prismatic (m)', 'q2 Base Yaw', 'q3 Shoulder', ...
+               'q4 Elbow', 'q5 Wrist Pitch', 'q6 Wrist Roll'};
+for j = 1:nJoints
     subplot(3,2,j);
     plot(t, q_hist(j,:), 'b-', 'LineWidth', 1.5);
-    xlabel('Time (s)'); ylabel('Angle (rad)');
+    xlabel('Time (s)');
+    if j == 1
+        ylabel('Position (m)');
+    else
+        ylabel('Angle (rad)');
+    end
     title(jointLabels{j});
     grid on;
 end
@@ -28,10 +41,15 @@ sgtitle('Joint Angles vs Time', 'FontSize', 14, 'FontWeight', 'bold');
 
 %% --- Figure 2: Joint Velocities ---
 figure('Name', 'Joint Velocities', 'Position', [100 50 1000 600]);
-for j = 1:5
+for j = 1:nJoints
     subplot(3,2,j);
     plot(t, qdot_hist(j,:), 'r-', 'LineWidth', 1.5);
-    xlabel('Time (s)'); ylabel('Vel (rad/s)');
+    xlabel('Time (s)');
+    if j == 1
+        ylabel('Vel (m/s)');
+    else
+        ylabel('Vel (rad/s)');
+    end
     title(jointLabels{j});
     grid on;
 end
@@ -45,10 +63,9 @@ subplot(2,2,[1,2]);
 plot3(ee_hist(1,:), ee_hist(2,:), ee_hist(3,:), 'b-', 'LineWidth', 2);
 hold on;
 plot3(path.pos(1,:), path.pos(2,:), path.pos(3,:), 'r--', 'LineWidth', 1.5);
-% Draw cylinder at world origin (offset -1.0 in X in robot base frame)
 [Xc, Yc, Zc] = cylinder(0.5, 50);
 Zc = Zc * 1.0;
-surf(Xc - 1.0, Yc, Zc, 'FaceColor', [0.7 0.7 0.7], ...
+surf(Xc + cyl_dx, Yc, Zc, 'FaceColor', [0.7 0.7 0.7], ...
      'FaceAlpha', 0.3, 'EdgeColor', 'none');
 grid on; axis equal;
 xlabel('X (m)'); ylabel('Y (m)'); zlabel('Z (m)');
@@ -103,7 +120,7 @@ title('JetArm Welding Simulation', 'FontSize', 14);
 % Static elements
 [Xc, Yc, Zc] = cylinder(0.5, 50);
 Zc = Zc * 1.0;
-surf(Xc-1.0, Yc, Zc, 'FaceColor', [0.7 0.7 0.7], ...
+surf(Xc + cyl_dx, Yc, Zc, 'FaceColor', [0.7 0.7 0.7], ...
      'FaceAlpha', 0.4, 'EdgeColor', 'none');
 plot3(path.pos(1,:), path.pos(2,:), path.pos(3,:), ...
       'k--', 'LineWidth', 1.5);
@@ -118,7 +135,7 @@ for i = 1:3:N
 
     % Build q struct
     q_struct = homeConfiguration(robot);
-    for j = 1:5
+    for j = 1:nJoints
         q_struct(j).JointPosition = q_hist(j, i);
     end
 

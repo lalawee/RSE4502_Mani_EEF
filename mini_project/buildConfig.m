@@ -46,13 +46,22 @@ switch upper(configStr)
     fprintf('  l0=%.3fm, l1=%.3fm, l2=%.3fm, l3=%.3fm, l4=%.3fm\n\n', l0,l1,l2,l3,l4);
 
     % [alpha_deg, a_m, d_m, theta_offset_deg, jointType]
+    % DH_cell = {
+    %      0,   0,    l0,   0,     'R';   % Joint 1: base yaw
+    %    -90,   0,    0,   -90,    'R';   % Joint 2: shoulder pitch
+    %      0,   l1,   0,    0,     'R';   % Joint 3: elbow pitch
+    %      0,   l2,   0,   -90,    'R';   % Joint 4: wrist pitch
+    %    -90,   0,    l3,   0,     'R';   % Joint 5: wrist roll
+    %      0,   0,    l4,   180,   'F';   % Joint 6: fixed tool frame
+    % };
     DH_cell = {
-         0,   0,    l0,   0,     'R';   % Joint 1: base yaw
-       -90,   0,    0,   -90,    'R';   % Joint 2: shoulder pitch
-         0,   l1,   0,    0,     'R';   % Joint 3: elbow pitch
-         0,   l2,   0,   -90,    'R';   % Joint 4: wrist pitch
-       -90,   0,    l3,   0,     'R';   % Joint 5: wrist roll
-         0,   0,    l4,   180,   'F';   % Joint 6: fixed tool frame
+         0,   0,   0,    0,   'P';   % Joint 0: prismatic lift along world Z
+         0,   0,   l0,   0,   'R';   % Joint 1: base yaw
+       -90,   0,   0,   -90,  'R';   % Joint 2: shoulder pitch
+         0,   l1,  0,    0,   'R';   % Joint 3: elbow pitch
+         0,   l2,  0,   -90,  'R';   % Joint 4: wrist pitch
+       -90,   0,   l3,   0,   'R';   % Joint 5: wrist roll
+         0,   0,   l4,   180, 'F';   % Fixed tool frame
     };
 
     % =====================================================================
