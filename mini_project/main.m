@@ -17,60 +17,10 @@ fprintf('Active joints: %d\n\n', nActive);
 %% --- Module 2: Workspace Analysis ---
 ws = analyzeWorkspace(robot, 'nSamples', 50000, 'baseOffset', baseOffset);
 
-%% --- Initial Configuration (numerical search using FK only) ---
-fprintf('Searching for initial configuration...\n');
-
-% Seam start in robot base frame
-target   = [0.5 - baseOffset(1); 0; 1.0];
-best_q   = zeros(nActive, 1);
-best_err = inf;
-
-% Coarse random search within joint limits
-nSearch = 50000;
-for s = 1:nSearch
-    q_try = jLimits(:,1) + (jLimits(:,2) - jLimits(:,1)) .* rand(nActive, 1);
-
-    q_struct = homeConfiguration(robot);
-    for j = 1:nActive
-        q_struct(j).JointPosition = q_try(j);
-    end
-    T = getTransform(robot, q_struct, robot.BodyNames{end});
-    err = norm(T(1:3,4) - target);
-
-    if err < best_err
-        best_err = err;
-        best_q   = q_try;
-    end
-end
-
-fmt = ['Best q: [' repmat('%.3f, ', 1, nActive)];
-fmt = [fmt(1:end-2) ']\n'];
-fprintf('Coarse error: %.4f m\n', best_err);
-fprintf(fmt, best_q');
-
-% Refine search around best_q
-fprintf('Refining...\n');
-for s = 1:nSearch
-    q_try = best_q + (rand(nActive,1) - 0.5) .* 0.2;
-    q_try = max(q_try, jLimits(:,1));
-    q_try = min(q_try, jLimits(:,2));
-
-    q_struct = homeConfiguration(robot);
-    for j = 1:nActive
-        q_struct(j).JointPosition = q_try(j);
-    end
-    T = getTransform(robot, q_struct, robot.BodyNames{end});
-    err = norm(T(1:3,4) - target);
-
-    if err < best_err
-        best_err = err;
-        best_q   = q_try;
-    end
-end
-
-fprintf('Refined error: %.4f m\n', best_err);
-fprintf(fmt, best_q');
-q = best_q;
+%% --- Initial Configuration ---
+target = [0.5 - baseOffset(1); 0; 1.0];   % seam start in robot base frame
+[q, init_err, w_init] = findInitialConfig(robot, DH_table, jointTypes, jLimits, target);
+fprintf('Initial EE error: %.4fm | Manipulability: %.4f\n\n', init_err, w_init);
 
 %% --- Module 3: Define Welding Path ---
 path = defineWeldPath('omega', 0.5, 'dt', 0.05, 'baseOffset', baseOffset(1));
