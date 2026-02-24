@@ -6,7 +6,7 @@
 clc; clear; close all;
 
 %% --- Configuration ---
-configStr  = 'JetArm';   % change to 'RRP', 'RRR', etc.
+configStr  = 'RRP';   % change to 'RRP', 'RRR', etc.
 baseOffset = [0.8, 0.0]; % robot base offset from cylinder center (world frame)
 
 %% --- Module 1: Build Robot ---
@@ -154,4 +154,5 @@ visualize(robot, path, q_hist, qdot_hist, ee_hist, w_hist, lambda_hist, baseOffs
 
 
 %% Save results
-save('sim_results.mat', 'q_hist', 'qdot_hist', 'ee_hist', 'w_hist', 'lambda_hist', 'path');
+save('sim_results.mat', 'q_hist', 'qdot_hist', 'ee_hist', ...
+     'w_hist', 'lambda_hist', 'path', 'configStr', 'baseOffset');
