@@ -13,7 +13,7 @@ function visualize(robot, path, q_hist, qdot_hist, ee_hist, w_hist, lambda_hist,
 %   baseOffset  - [x, y] robot base offset from world origin (e.g. [0.8, 0])
 
 if nargin < 8
-    baseOffset = [1.2, 0.0];
+    baseOffset = [0.8, 0.0];
 end
 
 t       = path.t;
@@ -91,13 +91,11 @@ legend('Actual', 'Desired'); grid on;
 
 % Z tracking
 subplot(2,3,5);
-
 plot(t, ee_hist(3,:), 'b-', 'LineWidth', 1.5); hold on;
 plot(t, path.pos(3,:), 'r--', 'LineWidth', 1.5);
 xlabel('Time (s)'); ylabel('Z (m)');
 title('EE Z vs Time');
 legend('Actual', 'Desired'); grid on;
-ylim([0.95, 1.05]);
 
 % Tracking error
 subplot(2,3,6);
@@ -145,29 +143,37 @@ plot3(path.pos(1,:), path.pos(2,:), path.pos(3,:), ...
 
 % Weld trace
 trace = plot3(NaN, NaN, NaN, 'r-', 'LineWidth', 3);
-tx = []; ty = []; tz = [];
 
-fprintf('Playing animation...\n');
-for i = 1:3:N
-    if ~isvalid(ax), break; end
+nRepeats = 10;   % number of times to replay — change as needed
+fprintf('Playing animation (%d times, Ctrl+C to stop)...\n', nRepeats);
 
-    % Build q struct
-    q_struct = homeConfiguration(robot);
-    for j = 1:nJoints
-        q_struct(j).JointPosition = q_hist(j, i);
+for rep = 1:nRepeats
+    tx = []; ty = []; tz = [];
+    fprintf('  Replay %d/%d\n', rep, nRepeats);
+
+    for i = 1:3:N
+        if ~isvalid(ax), break; end
+
+        q_struct = homeConfiguration(robot);
+        for j = 1:nJoints
+            q_struct(j).JointPosition = q_hist(j, i);
+        end
+
+        show(robot, q_struct, 'Parent', ax, ...
+             'PreservePlot', false, 'FastUpdate', true);
+
+        tx = [tx, ee_hist(1,i)];
+        ty = [ty, ee_hist(2,i)];
+        tz = [tz, ee_hist(3,i)];
+        set(trace, 'XData', tx, 'YData', ty, 'ZData', tz);
+
+        drawnow;
+        pause(0.02);
     end
 
-    show(robot, q_struct, 'Parent', ax, ...
-         'PreservePlot', false, 'FastUpdate', true);
-
-    % Update weld trace
-    tx = [tx, ee_hist(1,i)];
-    ty = [ty, ee_hist(2,i)];
-    tz = [tz, ee_hist(3,i)];
-    set(trace, 'XData', tx, 'YData', ty, 'ZData', tz);
-
-    drawnow;
-    pause(0.02);
+    if rep < nRepeats
+        pause(1.0);   % brief pause between replays
+    end
 end
 
 fprintf('Animation complete.\n');
