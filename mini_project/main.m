@@ -6,7 +6,7 @@
 clc; clear; close all;
 
 %% --- Configuration ---
-configStr  = 'JetArm';   % change to 'RRP' or 'RRR' or 'JetArm' - basically the  jet arm config with an additional  prismatic joint.. or 'JETARM_NOPRIS' - basically the original jet arm config without the prismatic joint
+configStr  = 'JetArm';   % change to 'RRP' or 'RRR' or 'JetArm' - basically the  jet arm config with an additional  prismatic joint
 baseOffset = [1.2, 0.0]; % robot base offset from cylinder center (world frame)
 
 %% --- Build Robot ---

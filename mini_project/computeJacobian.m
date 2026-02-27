@@ -1,6 +1,7 @@
 function J = computeJacobian(DH_table, q, jointTypes)
 % computeJacobian
-
+% Computes the geometric Jacobian from first principles via direct column
+% construction. Works for any combination of revolute and prismatic joints.
 %
 % Inputs:
 %   DH_table   - nx4 numeric matrix [alpha_deg, a_m, d_m, theta_offset_deg]
@@ -11,11 +12,13 @@ function J = computeJacobian(DH_table, q, jointTypes)
 % Output:
 %   J          - 6xm Jacobian matrix [angular (3xm); linear (3xm)]
 %
-% Convention:
-%   Column i of J = contribution of joint i to EE velocity
-%   Revolute:  J_i = [z_{i-1}; z_{i-1} x (p_e - p_{i-1})]
-%   Prismatic: J_i = [0;        z_{i-1}                  ]
-%   Fixed:     skipped (no contribution)
+% Convention (Craig's Modified DH):
+%   For each active joint i, z_i and p_i are extracted from T_0^i
+%   (the transform AFTER the joint's alpha twist and offset are applied).
+%
+%   Revolute:  J_i = [z_i; z_i x (p_e - p_i)]
+%   Prismatic: J_i = [0;   z_i               ]
+%   Fixed:     skipped — no contribution to EE velocity
 
 n = size(DH_table, 1);   % total DH rows including fixed
 
@@ -33,7 +36,7 @@ T = eye(4);
 Transforms = cell(n+1, 1);
 Transforms{1} = T;   % T_0^0 = identity
 
-qIdx = 0;   % index into q vector (only increments for active joints)
+qIdx = 0;    % index into q — increments only for active (non-fixed) joints
 
 for i = 1:n
     alpha = DH_table(i, 1);
@@ -63,7 +66,10 @@ end
 % --- Step 2: End effector position ---
 p_e = Transforms{n+1}(1:3, 4);
 
-% --- Step 3: Build J column by column (active joints only) ---
+% --- Step 3: Build Jacobian column by column ---
+% For Craig's modified DH, z_i and p_i are taken from T_0^i
+% (i.e. Transforms{i+1}), which is the frame AFTER the joint acts.
+
 J    = zeros(6, m);
 qIdx = 0;
 
