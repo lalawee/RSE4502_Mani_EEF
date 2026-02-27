@@ -1,0 +1,867 @@
+\documentclass[12pt]{article}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{placeins}
+\geometry{margin=1in}
+
+\title{RSE4502 Mini Project 1\\
+Jacobian-Based Welding Trajectory Tracking}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+
+
+\section{Project Summary}
+The objective of this project is to simulate a robotic manipulator tracing 
+a circular welding seam around a cylindrical workpiece of radius
+\[
+r = 0.5~\text{m},
+\]
+whose seam lies at a fixed height of
+\[
+h_t = 1.0~\text{m}.
+\]
+The end-effector is required to follow this circular trajectory while 
+maintaining a constant tool orientation relative to the workpiece.
+
+Rather than implementing a controller for a single fixed robot design, 
+the software is structured as a configuration-agnostic framework. The 
+system dynamically constructs a robotic manipulator from user-defined 
+Modified Denavit--Hartenberg (Craig) parameters and specified joint types 
+(Revolute, Prismatic, or Fixed). This allows different robot architectures 
+to be evaluated under identical task conditions by changing a single 
+configuration string.
+
+The framework is composed of four major subsystems:
+
+\begin{itemize}
+    \item \textbf{Dynamic Robot Construction:}  
+    A \texttt{rigidBodyTree} model is built automatically from Modified 
+    DH parameters and joint metadata. Joint limits and velocity limits 
+    are enforced at all stages of simulation.
+
+    \item \textbf{Initial Configuration Search:}
+    A valid starting joint configuration is found using MATLAB's 
+    \texttt{inverseKinematics} solver, initialised from a manually 
+    specified posture hint that guides the solver toward a geometrically 
+    sensible arm configuration. The solution is verified by checking 
+    position error and manipulability at the returned configuration.
+
+    \item \textbf{Jacobian-Based Inverse Kinematics:}  
+    A differential inverse kinematics loop is implemented using the 
+    geometric Jacobian, computed from first principles via direct column 
+    construction. Joint velocities are resolved from desired end-effector 
+    velocities using a Damped Least Squares (DLS) formulation to provide 
+    robustness near singular configurations. A proportional position 
+    feedback term is included to correct accumulated integration drift 
+    and maintain sub-millimetre steady-state tracking error.
+
+    \item \textbf{Visualisation and Replay:}  
+    The resulting motion, tracking error, singularity metrics, and robot 
+    behaviour are visualised and animated for evaluation.
+\end{itemize}
+
+Additionally, the framework explicitly accounts for joint limits and the 
+robot base offset relative to the centre of the cylindrical workpiece. 
+This enables systematic evaluation of different robot configurations 
+without requiring structural changes to downstream modules.
+
+\section{Dynamic Rigid-Body Construction via Modified DH (Craig)}
+
+Robot models are constructed programmatically from a configuration string
+without hard-coding link objects. Each configuration specifies a Modified
+DH (Craig) table with explicit joint types per row:
+\[
+\text{DH row } i:\ \big[\alpha_{i-1}~(\deg),\ a_{i-1}~(\text{m}),\
+d_i~(\text{m}),\ \theta_{0,i}~(\deg),\ \text{type} \in \{R, P, F\}\big].
+\]
+
+\subsection{Robot Configuration: Modified JetArm (PRRRRR)}
+
+The original JetArm is a five-revolute (RRRRR) manipulator. A prismatic
+joint is prepended at the base for vertical lift, satisfying the
+assignment requirement and extending vertical reach to cover
+$h_t = 1.0~\text{m}$. All link lengths are scaled by $6\times$ from the
+physical platform:
+\[
+l_0 = 0.619~\text{m},\quad l_1 = l_2 = 0.777~\text{m},\quad
+l_3 = 0.357~\text{m},\quad l_4 = 0.153~\text{m}.
+\]
+The base is offset $b_x = 1.2~\text{m}$ from the cylinder centre.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{cccccl}
+\hline
+$i$ & $\alpha_{i-1}$ & $a_{i-1}$ (m) & $d_i$ (m) &
+$\theta_{\text{off}}$ (deg) & Type \\
+\hline
+1 & $0$   & $0$   & $0$   & $0$   & P (prismatic lift) \\
+2 & $0$   & $0$   & $l_0$ & $0$   & R (base yaw) \\
+3 & $-90$ & $0$   & $0$   & $-90$ & R (shoulder) \\
+4 & $0$   & $l_1$ & $0$   & $0$   & R (elbow) \\
+5 & $0$   & $l_2$ & $0$   & $-90$ & R (wrist pitch) \\
+6 & $-90$ & $0$   & $l_3$ & $0$   & R (wrist roll) \\
+7 & $0$   & $0$   & $l_4$ & $180$ & F (fixed tool) \\
+\hline
+\end{tabular}
+\caption{DH parameters for the modified JetArm (PRRRRR).}
+\label{tab:dh_jetarm}
+\end{table}
+
+Joint limits and velocity limits are given in Table~\ref{tab:limits_jetarm}.
+The yaw and shoulder joints permit $\pm 2\pi$ to allow continuous
+circumferential sweeping. Velocity limits are set high relative to task
+demands --- peak observed velocities were under $0.4~\text{rad/s}$, making
+them non-binding.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{clccc}
+\hline
+Joint & Description & $q_{\min}$ & $q_{\max}$ & $\dot{q}_{\max}$ \\
+\hline
+1 & Prismatic lift & $-0.5~\text{m}$    & $1.5~\text{m}$    & $10~\text{m/s}$ \\
+2 & Base yaw       & $-2\pi~\text{rad}$ & $2\pi~\text{rad}$ & $10~\text{rad/s}$ \\
+3 & Shoulder       & $-2\pi~\text{rad}$ & $2\pi~\text{rad}$ & $10~\text{rad/s}$ \\
+4 & Elbow          & $-\pi~\text{rad}$  & $\pi~\text{rad}$  & $10~\text{rad/s}$ \\
+5 & Wrist pitch    & $-\pi~\text{rad}$  & $\pi~\text{rad}$  & $10~\text{rad/s}$ \\
+6 & Wrist roll     & $-\pi~\text{rad}$  & $\pi~\text{rad}$  & $10~\text{rad/s}$ \\
+\hline
+\end{tabular}
+\caption{Joint and velocity limits for the modified JetArm.}
+\label{tab:limits_jetarm}
+\end{table}
+
+\subsection{Robot Assembly (\texttt{buildConfig} and \texttt{buildRobotFromDH})}
+
+\texttt{buildConfig} maps the configuration string to a DH cell array and
+extracts the numeric DH matrix, joint type list, joint limits
+$\mathbf{jLimits}$, velocity limits $\mathbf{vLimits}$, and posture hint
+$\mathbf{q}_{\text{hint}}$. For revolute joints $q_k$ adds to $\theta$;
+for prismatic joints $q_k$ adds to $d$.
+
+\texttt{buildRobotFromDH} iterates through each DH row, creates a
+\texttt{rigidBody} and \texttt{rigidBodyJoint} of the appropriate type,
+computes the fixed transform via \texttt{spatialTransform}, and appends
+the body to the kinematic chain. Joint limits are applied after
+construction, with home position set to $q_{k,\text{home}} =
+(q_{k,\min} + q_{k,\max})/2$.
+
+% =====================================================================
+\subsection{Joint Limit Application and Home Positioning}
+% =====================================================================
+
+After the tree is built, joint limits are applied to each active joint in
+sequence (fixed joints are skipped). For joint $k$:
+\[
+q_{k,\min} \le q_k \le q_{k,\max}.
+\]
+To ensure the \texttt{rigidBodyTree} has a valid default pose, the home
+position is set to the midpoint of the allowable range:
+\[
+q_{k,\text{home}} = \frac{q_{k,\min} + q_{k,\max}}{2}.
+\]
+
+Joint limits and velocity limits for the modified JetArm are:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{clccc}
+\hline
+Joint & Description & $q_{\min}$ & $q_{\max}$ & $\dot{q}_{\max}$ \\
+\hline
+1 & Prismatic lift & $-0.5~\text{m}$    & $1.5~\text{m}$    & $10~\text{m/s}$ \\
+2 & Base yaw       & $-2\pi~\text{rad}$ & $2\pi~\text{rad}$ & $10~\text{rad/s}$ \\
+3 & Shoulder pitch & $-2\pi~\text{rad}$ & $2\pi~\text{rad}$ & $10~\text{rad/s}$ \\
+4 & Elbow pitch    & $-\pi~\text{rad}$  & $\pi~\text{rad}$  & $10~\text{rad/s}$ \\
+5 & Wrist pitch    & $-\pi~\text{rad}$  & $\pi~\text{rad}$  & $10~\text{rad/s}$ \\
+6 & Wrist roll     & $-\pi~\text{rad}$  & $\pi~\text{rad}$  & $10~\text{rad/s}$ \\
+\hline
+\end{tabular}
+\caption{Joint limits and velocity limits for the modified JetArm (PRRRRR).}
+\label{tab:limits_jetarm}
+\end{table}
+
+Joint limits were selected based on geometric reachability rather than
+hardware constraints, since the robot is simulated. The prismatic lift is
+bounded to $[-0.5,\, 1.5]~\text{m}$, centring the seam height
+$h_t = 1.0~\text{m}$ within the stroke with $\pm 0.5~\text{m}$ margin.
+The yaw and shoulder joints are permitted full multi-turn rotation
+($\pm 2\pi$) since the task requires continuous circumferential sweeping
+without encountering a joint stop. Velocity limits are set high relative
+to task demands — the unconstrained simulation showed peak velocities well
+below these values, and tighter limits had no measurable effect on tracking
+performance.
+
+The final outputs of this module are:
+\[
+(\texttt{robot},\ \mathbf{DH},\ \texttt{jointTypes},\ \mathbf{jLimits},\
+\mathbf{vLimits},\ \mathbf{q}_{\text{hint}}).
+\]
+
+\section{Pre-Execution Setup}
+
+Prior to executing the Jacobian inverse kinematics loop, two preparatory 
+steps are performed: (1) the welding path is defined in the robot base frame 
+as the reference trajectory for the IK loop, and (2) a valid initial joint 
+configuration is found by a manipulability-aware forward kinematics search. 
+Together these steps ensure that the main simulation loop begins with a 
+well-defined reference signal and a well-conditioned starting state.
+
+% =========================================================
+\section{Welding Path Definition}
+% =========================================================
+
+The welding path is defined as a constant-angular-velocity circular seam 
+of radius $r = 0.5~\text{m}$ at height $h_t = 1.0~\text{m}$, centred at 
+the world origin. Since the Jacobian and all kinematic computations are 
+expressed in the robot base frame, the path must be transformed accordingly 
+before being used as a reference for the IK loop.
+
+\subsection{Coordinate Frame Transformation}
+
+The robot base is offset from the world origin by $b_x$ along the $X$-axis. 
+The seam position in the world frame is
+
+\[
+\mathbf{p}_{\text{world}}(t) =
+\begin{bmatrix}
+r\cos(\omega t) \\
+r\sin(\omega t) \\
+h_t
+\end{bmatrix},
+\]
+
+and after subtracting the base offset, the path expressed in the robot base 
+frame is
+
+\[
+\mathbf{p}_{\text{robot}}(t) =
+\begin{bmatrix}
+r\cos(\omega t) - b_x \\
+r\sin(\omega t) \\
+h_t
+\end{bmatrix}.
+\]
+
+Since $b_x$ is constant, it vanishes upon differentiation and the desired 
+linear velocity in the robot base frame is
+
+\[
+\dot{\mathbf{p}}_{\text{robot}}(t) =
+\begin{bmatrix}
+-r\omega\sin(\omega t) \\
+r\omega\cos(\omega t) \\
+0
+\end{bmatrix}.
+\]
+
+This velocity signal is fed directly into the Jacobian IK loop as 
+$\dot{\mathbf{x}}_{\text{des}}$ at each timestep. Frame consistency is 
+maintained throughout: the Jacobian $\mathbf{J}(\mathbf{q})$ is constructed 
+in the robot base frame and the desired velocity is expressed in the same 
+frame, ensuring the IK equation
+
+\[
+\dot{\mathbf{q}} = \mathbf{J}_{\text{lin}}^{+}\,\dot{\mathbf{x}}_{\text{des}}
+\]
+
+is dimensionally and frame-consistent.
+
+\subsection{Effect of Base Offset on Reachability}
+
+The base offset $b_x$ directly determines the $X$-axis range of the seam 
+in the robot base frame:
+
+\[
+x(t) \in \left[-r - b_x,\; r - b_x\right].
+\]
+
+With $b_x = 0.8~\text{m}$, this gives $x \in [-1.3,\; -0.3]~\text{m}$. 
+The near side of the seam is only $0.3~\text{m}$ from the robot base, 
+while the far side requires $1.3~\text{m}$ of reach. This asymmetry has 
+a direct consequence for the RRP configuration, whose prismatic extension 
+joint is bounded to $[0.1,\; 0.8]~\text{m}$: the joint saturates before 
+the far side of the seam is reached, causing the tracking failure observed 
+at $t \approx 2~\text{s}$.
+
+\subsection{Tool Orientation}
+
+A fixed tool orientation is specified as
+
+\[
+\mathbf{R}_{\text{tool}} = \mathbf{R}_z(0)\,\mathbf{R}_y(\pi)\,\mathbf{R}_x(0),
+\]
+
+corresponding to the welding torch pointing straight down toward the 
+workpiece surface. The desired angular velocity is set to zero throughout:
+
+\[
+\boldsymbol{\omega}_{\text{des}} = \mathbf{0}.
+\]
+
+The full desired task-space velocity vector is assembled as
+
+\[
+\mathbf{v}_{\text{des}}(t) =
+\begin{bmatrix}
+\boldsymbol{\omega}_{\text{des}} \\
+\dot{\mathbf{p}}_{\text{robot}}(t)
+\end{bmatrix}
+\in \mathbb{R}^6.
+\]
+
+It should be noted that the Jacobian IK solver uses only the linear velocity 
+rows of the Jacobian ($\mathbf{J}_{\text{lin}} = \mathbf{J}(4:6,:)$), so 
+tool orientation is not actively controlled during trajectory tracking. The 
+end-effector orientation at any given timestep is determined entirely by the 
+forward kinematics at the current joint configuration $\mathbf{q}$, and is 
+not guaranteed to match $\mathbf{R}_{\text{tool}}$. This is a known 
+limitation of the position-only IK formulation adopted in this work.
+
+% =========================================================
+\section{Initial Configuration Search}
+% =========================================================
+
+A valid starting configuration $\mathbf{q}_0$ is found using MATLAB's
+\texttt{inverseKinematics} solver, initialised from a posture hint
+$\mathbf{q}_{\text{hint}}$ --- a manually specified joint vector that
+places the arm in a geometrically sensible pose (base yaw toward the
+seam, prismatic near $h_t$, elbow bent). The hint does not need to be
+exact; it guides the gradient-based solver away from degenerate local
+minima.
+
+\subsection{Assumptions}
+
+The search assumes prior knowledge of the workpiece geometry and its pose
+relative to the robot base frame. The seam entry point $\mathbf{p}^*$ is
+computed analytically from known parameters:
+\[
+\mathbf{p}^* = \begin{bmatrix} r - b_x \\ 0 \\ h_t \end{bmatrix},
+\]
+where $r = 0.5~\text{m}$, $h_t = 1.0~\text{m}$, and $b_x = 1.2~\text{m}$.
+The entry angle is fixed at $\phi_0 = 0$. In a physical deployment this
+information would come from a calibrated fixture or perception system.
+End-effector orientation at $\mathbf{q}_0$ is not enforced --- the IK
+loop recovers correct tracking from the first timestep onward.
+
+\subsection{MATLAB IK Solver}
+
+The target is passed as a $4\times4$ homogeneous transform with
+position-only task weights $\mathbf{w} = [0,0,0,1,1,1]$, consistent
+with the position-only IK loop that follows. Once a solution is returned,
+the residual error $e_0 = \|\mathbf{p}_{ee}(\mathbf{q}_0) -
+\mathbf{p}^*\|_2$ and manipulability $w_0$ are verified. Warnings are
+raised if $e_0 > 0.05~\text{m}$ or $w_0 < 0.05$.
+
+
+% =========================================================
+\section{Geometric Jacobian Construction}
+% =========================================================
+
+The geometric Jacobian $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 \times m}$ 
+relates the active joint velocities $\dot{\mathbf{q}} \in \mathbb{R}^m$ to 
+the end-effector spatial velocity:
+\[
+\begin{bmatrix} \boldsymbol{\omega}_{ee} \\ \dot{\mathbf{p}}_{ee} 
+\end{bmatrix} = \mathbf{J}(\mathbf{q})\, \dot{\mathbf{q}},
+\]
+where $\boldsymbol{\omega}_{ee}$ is the angular velocity and 
+$\dot{\mathbf{p}}_{ee}$ is the linear velocity of the end-effector, both 
+expressed in the base frame. The Jacobian is computed from first principles 
+via direct column construction --- no built-in Jacobian functions are used.
+
+\subsection{Forward Kinematics Pass}
+
+The first step is to evaluate the full forward kinematics chain at the 
+current joint vector $\mathbf{q}$. For each DH row $i = 1,\ldots,n$, the 
+cumulative base-to-frame transform is computed:
+\[
+{}^{0}T_i = {}^{0}T_{i-1} \cdot \texttt{spatialTransform}
+\big([\alpha_{i-1},\ a_{i-1},\ d_i(\mathbf{q}),\ \theta_i(\mathbf{q})]\big),
+\]
+where the joint variable $q_k$ is substituted into the appropriate 
+parameter depending on joint type:
+\[
+\theta_i = \theta_{0,i} + q_k \quad (\text{revolute}), \qquad
+d_i = d_{0,i} + q_k \quad (\text{prismatic}).
+\]
+Fixed joints use constant DH parameters with no joint variable. All 
+transforms $\{{}^{0}T_0,\ {}^{0}T_1,\ \ldots,\ {}^{0}T_n\}$ are stored, 
+and the end-effector position is extracted from the final transform:
+\[
+\mathbf{p}_e = {}^{0}T_n(1:3,\, 4).
+\]
+
+\subsection{Column Construction}
+
+With all frame transforms available, each active joint $k$ contributes 
+one column to $\mathbf{J}$. Under Craig's modified DH convention, the 
+joint axis and origin for joint $k$ are taken from ${}^{0}T_k$ --- the 
+transform \textit{after} the joint's $\alpha$ twist has been applied:
+\[
+\hat{z}_k = {}^{0}T_k(1:3,\, 3), \qquad
+\mathbf{p}_k = {}^{0}T_k(1:3,\, 4).
+\]
+
+The Jacobian column for joint $k$ is then:
+
+\[
+\mathbf{J}_k =
+\begin{cases}
+\begin{bmatrix} \hat{z}_k \\ \hat{z}_k \times (\mathbf{p}_e - \mathbf{p}_k) 
+\end{bmatrix} & \text{revolute joint}, \\[10pt]
+\begin{bmatrix} \mathbf{0} \\ \hat{z}_k \end{bmatrix} 
+& \text{prismatic joint}.
+\end{cases}
+\]
+
+\paragraph{Revolute joints} rotate about $\hat{z}_k$, producing both an 
+angular velocity contribution $\hat{z}_k$ and a linear velocity 
+contribution $\hat{z}_k \times (\mathbf{p}_e - \mathbf{p}_k)$, which is 
+the moment arm cross product between the joint axis and the vector from 
+the joint origin to the end-effector.
+
+\paragraph{Prismatic joints} translate along $\hat{z}_k$, producing only 
+a linear velocity contribution $\hat{z}_k$ with no angular component.
+
+\paragraph{Fixed joints} contribute no column --- they are skipped entirely.
+
+The full Jacobian is assembled column by column, yielding:
+\[
+\mathbf{J} = \begin{bmatrix} \mathbf{J}_{\omega} \\ \mathbf{J}_{v} 
+\end{bmatrix} \in \mathbb{R}^{6 \times m},
+\]
+where the upper three rows $\mathbf{J}_{\omega}$ carry angular velocity 
+contributions and the lower three rows $\mathbf{J}_{v} = \mathbf{J}(4:6,:)$ 
+carry linear velocity contributions.
+
+\subsection{Why Direct Column Construction}
+
+The direct column construction approach was chosen over recursive velocity 
+propagation because the FK transforms are already computed in the first 
+pass, making the column extraction essentially free. Additionally, mixed 
+revolute-prismatic chains are handled cleanly since each joint type is an 
+independent column formula with no interaction between joints. Both 
+approaches produce identical Jacobians.
+
+\subsection{Singular Configurations}
+
+A configuration $\mathbf{q}$ is singular when the Jacobian loses rank --- 
+that is, when one or more joints become linearly dependent and the 
+end-effector loses the ability to move in certain directions. This is 
+detected using the manipulability index:
+\[
+w(\mathbf{q}) = \sqrt{\left|\det\!\left(
+\mathbf{J}_v \mathbf{J}_v^{\top}\right)\right|}.
+\]
+When $w \approx 0$, the linear Jacobian $\mathbf{J}_v$ is rank-deficient 
+and the standard pseudoinverse would produce arbitrarily large joint 
+velocities. For the modified JetArm, singular configurations arise when:
+
+\begin{itemize}
+    \item The shoulder and elbow joints align such that links $l_1$ and 
+    $l_2$ are fully extended or fully folded, reducing the effective 
+    planar reach to a single line.
+    \item The wrist joints align the wrist pitch and roll axes, causing 
+    gimbal-lock-like loss of an orientation degree of freedom (wrist 
+    singularity).
+    \item The prismatic lift drives the arm to a configuration where 
+    multiple revolute axes become coplanar.
+\end{itemize}
+
+In practice, the manipulability index remained between $0.8$ and $1.8$ 
+throughout the welding trajectory (Figure~\ref{fig:singularity}), well 
+above the detection threshold $\epsilon = 0.01$, confirming that the 
+chosen base placement and joint configuration avoided singular poses 
+for the full $2\pi$ seam.
+
+% =========================================================
+\section{Main Simulation Loop (Jacobian IK Integration)}
+% =========================================================
+
+The core simulation implements a discrete-time inverse kinematics loop 
+in which the desired end-effector velocity is mapped to joint velocities 
+at each timestep via the Jacobian pseudoinverse, and joint positions are 
+updated by numerical integration. The loop runs for $N$ timesteps with 
+a fixed timestep $\Delta t$, both defined by the welding path. At each 
+step the Jacobian is recomputed at the current joint configuration, so 
+the velocity mapping stays accurate as the robot moves.
+
+\subsection{Logged Signals and Preallocation}
+
+Let $m$ be the number of active (non-fixed) joints. The following arrays 
+are preallocated before the loop begins:
+
+\begin{itemize}
+    \item $\mathbf{q}_{\text{hist}} \in \mathbb{R}^{m \times N}$ — joint positions at each timestep
+    \item $\dot{\mathbf{q}}_{\text{hist}} \in \mathbb{R}^{m \times N}$ — joint velocities at each timestep
+    \item $\mathbf{p}_{\text{ee,hist}} \in \mathbb{R}^{3 \times N}$ — actual end-effector position, used to measure tracking error
+    \item $\lambda_{\text{hist}} \in \mathbb{R}^{1 \times N}$ — damping coefficient, non-zero only near singularities
+    \item $w_{\text{hist}} \in \mathbb{R}^{1 \times N}$ — manipulability index at each timestep
+    \item $\texttt{singular\_hist} \in \{0,1\}^{1 \times N}$ — flag indicating whether a singularity was detected
+\end{itemize}
+
+\subsection{Per-Timestep Execution}
+
+The following steps are executed for each timestep $i = 1,\ldots,N$:
+
+\begin{enumerate}
+
+    \item \textbf{Store current joint state.}
+    $\mathbf{q}$ is recorded at the start of the timestep before any 
+    update is applied.
+
+    \item \textbf{Forward kinematics.}
+    The current end-effector position is obtained by evaluating forward 
+    kinematics at the current $\mathbf{q}$:
+    \[
+    \mathbf{p}_{ee}(i) = {}^{0}T_{ee}(\mathbf{q})\,(1:3,\,4).
+    \]
+    This gives the \textit{actual} position of the end-effector, which 
+    is compared against the desired position on the seam to measure drift.
+
+    \item \textbf{Geometric Jacobian computation.}
+    The geometric Jacobian $\mathbf{J}(\mathbf{q}) \in \mathbb{R}^{6 
+    \times m}$ is computed from first principles at the current 
+    $\mathbf{q}$:
+    \[
+    \mathbf{J} = \begin{bmatrix}\mathbf{J}_{\omega} \\ 
+    \mathbf{J}_{v}\end{bmatrix},
+    \]
+    where $\mathbf{J}_{\omega}$ maps joint velocities to end-effector 
+    angular velocity and $\mathbf{J}_{v} = \mathbf{J}(4:6,:)$ maps joint 
+    velocities to end-effector linear velocity. Since this project tracks 
+    position only, only $\mathbf{J}_{v}$ is used in the IK solve.
+
+    \item \textbf{Velocity command with drift correction.}
+    
+    If joint velocities are integrated over many timesteps, small errors 
+    accumulate and the end-effector gradually drifts off the seam. To 
+    prevent this, a proportional correction term is added to the desired 
+    velocity at each step:
+    \[
+    \mathbf{v}_{\text{cmd}}(i) = 
+    \underbrace{\dot{\mathbf{x}}_{\text{des}}(i)}_{\text{follow the path}} 
+    + \underbrace{k_p\!\left(\mathbf{p}_{\text{des}}(i) - 
+    \mathbf{p}_{ee}(i)\right)}_{\text{correct the drift}},
+    \quad k_p = 2.0.
+    \]
+    The first term drives the robot along the seam at the desired velocity. 
+    The second term pulls the end-effector back toward the desired position 
+    whenever it has drifted away. Without this correction, open-loop 
+    integration would cause the tracking error to grow unboundedly over 
+    the full $2\pi$ trajectory.
+
+    \item \textbf{DLS pseudoinverse.}
+    Joint velocities are resolved from $\mathbf{v}_{\text{cmd}}$ via the 
+    Damped Least Squares (DLS) pseudoinverse:
+    \[
+    \dot{\mathbf{q}} =
+    \mathbf{J}_{v}^{\top}
+    \left(
+    \mathbf{J}_{v}\mathbf{J}_{v}^{\top}
+    + \lambda^2 \mathbf{I}
+    \right)^{-1}
+    \mathbf{v}_{\text{cmd}}.
+    \]
+    Near singular configurations, $\det(\mathbf{J}_v \mathbf{J}_v^\top) 
+    \approx 0$ and the standard pseudoinverse produces very large joint 
+    velocities. The damping term $\lambda^2\mathbf{I}$ prevents this by 
+    regularising the inversion. The damping coefficient is adaptive:
+    \[
+    \lambda =
+    \begin{cases}
+    \lambda_{\max}\!\left(1 - \left(\dfrac{w}{\epsilon}\right)^{\!2}
+    \right), & w < \epsilon, \\
+    0, & w \ge \epsilon,
+    \end{cases}
+    \]
+    where
+    \[
+    w = \sqrt{\left|\det\!\left(\mathbf{J}_{v}\mathbf{J}_{v}^{\top}
+    \right)\right|}
+    \]
+    is the manipulability index. When $w$ is large the robot is far from 
+    singularity and $\lambda = 0$, so the standard pseudoinverse is used. 
+    As $w$ drops toward zero, $\lambda$ increases and the inversion is 
+    progressively damped, trading a small amount of tracking accuracy for 
+    bounded joint velocities.
+
+    \item \textbf{Clamping and integration.}
+    Joint velocities are clamped to their hardware limits before 
+    integration:
+    \[
+    \dot{\mathbf{q}} \leftarrow
+    \mathrm{clamp}(\dot{\mathbf{q}},\, -\mathbf{v}_{\max},\, 
+    \mathbf{v}_{\max}).
+    \]
+    The joint state is then updated by forward Euler and clamped to 
+    position limits:
+    \[
+    \mathbf{q}_{k+1} =
+    \mathrm{clamp}\!\left(
+    \mathbf{q}_k + \dot{\mathbf{q}}_k\,\Delta t,\;
+    \mathbf{q}_{\min},\; \mathbf{q}_{\max}
+    \right).
+    \]
+    Forward Euler is used because the timestep $\Delta t = 0.05~\text{s}$ 
+    is small relative to the path dynamics, and the drift correction term 
+    actively compensates for any integration error that accumulates.
+
+    \item \textbf{Log outputs.}
+    $\dot{\mathbf{q}}$, $\lambda$, $w$, and the singularity flag are 
+    stored for post-processing and visualisation.
+
+\end{enumerate}
+
+
+\subsection{Joint Velocity Limits}
+
+Joint velocity limits $\mathbf{v}_{\max}$ are defined in \texttt{buildConfig}
+for each configuration. They were derived empirically: the simulation was
+first run unconstrained, peak joint velocities were recorded, and limits
+were set to $1.5\times$ the observed maximum to allow margin for transient
+demands while preventing unrealistic joint speeds. For the JetArm configuration, velocity limits were set conservatively 
+high at $10~\text{rad/s}$ (or $\text{m/s}$ for the prismatic joint), 
+as the observed peak velocities during the welding task were well below 
+$0.5~\text{rad/s}$, making the limits non-binding throughout the trajectory.
+\clearpage
+\section{Results and Discussion}
+
+\subsection{End-Effector Tracking Performance}
+
+
+\begin{figure}[!ht]
+    \centering
+    \begin{minipage}{0.55\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{eef_error_tracking.png}
+        \caption{End-effector tracking performance: 3D path, per-axis 
+        position traces, and total position error.}
+        \label{fig:ee_tracking}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.40\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{robot_result.png}
+        \caption{JetArm welding simulation: robot pose at mid-trajectory 
+        with traced path (red) and desired seam (black dashed).}
+        \label{fig:simulation}
+    \end{minipage}
+\end{figure}
+\FloatBarrier
+
+The modified JetArm (PRRRRR) configuration successfully traced the full 
+$2\pi$ welding seam. Figure~\ref{fig:ee_tracking} shows the end-effector 
+path against the desired seam in 3D, along with per-axis position traces 
+and the total position error over time.
+
+
+
+The tracking error starts at approximately $75~\text{mm}$ at $t = 0$, 
+which reflects the gap between the initial configuration $\mathbf{q}_0$ 
+found by the search and the exact seam entry point. The proportional 
+drift correction term ($k_p = 2.0$) drives this error down rapidly — 
+within approximately $2~\text{s}$ the error falls below $5~\text{mm}$ 
+and remains there for the rest of the trajectory. The maximum Z deviation 
+over the full run is:
+\[
+\max_t \left| z_{\text{ee}}(t) - h_t \right| = 16.5~\text{mm},
+\]
+which occurs during the initial transient. Once the feedback correction 
+has converged, the Z deviation is negligible. The X and Y traces overlap 
+the desired seam closely for the entire trajectory, confirming that the 
+circular path is traced accurately in the horizontal plane.
+
+
+\clearpage
+\subsection{Joint Trajectories}
+
+\begin{figure}[!ht]
+    \centering
+    \begin{minipage}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{jointangles.png}
+        \caption{Joint positions vs time.}
+        \label{fig:joint_angles}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{jointvelocities.png}
+        \caption{Joint velocities vs time.}
+        \label{fig:joint_velocities}
+    \end{minipage}
+\end{figure}
+\FloatBarrier
+
+Joints $q_1$ through $q_5$ exhibit smooth, continuous position and 
+velocity profiles consistent with the sinusoidal velocity demand of the 
+circular path. Key observations from the plots:
+
+The prismatic lift joint $q_1$ oscillates between approximately 
+$0.80~\text{m}$ and $1.10~\text{m}$, well within its limits of 
+$[-0.5,\, 1.5]~\text{m}$, confirming that vertical reach is not a 
+bottleneck for this task. The base yaw $q_2$ sweeps between approximately 
+$2.6$ and $3.6~\text{rad}$, and the shoulder $q_3$ and elbow $q_4$ vary 
+smoothly over ranges of roughly $1.5~\text{rad}$ each. All velocities 
+remain well below the set limits of $10~\text{rad/s}$, with peak values 
+under $0.4~\text{rad/s}$ for the revolute joints and under $0.1~\text{m/s}$ 
+for the prismatic joint.
+
+The wrist roll joint $q_6$ is an exception. Its velocity profile shows 
+high-frequency noise at the order of $10^{-17}~\text{rad/s}$, and its 
+position remains effectively constant throughout the trajectory. This 
+occurs because the robot has 6 active joints controlling only 3 
+task-space coordinates --- the system is kinematically redundant with 
+respect to the task. The wrist roll axis lies in the null space of 
+$\mathbf{J}_v$ for much of the trajectory, meaning it has no influence 
+on end-effector position. The DLS pseudoinverse distributes numerical 
+residuals into this unconstrained direction, producing floating-point 
+chatter at machine epsilon. This has no physical significance and no 
+effect on tracking performance.
+\clearpage
+\subsection{Singularity Analysis}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.75\linewidth]{singularity.png}
+    \caption{Manipulability index $w$ and DLS damping coefficient 
+    $\lambda$ over time.}
+    \label{fig:singularity}
+\end{figure}
+\FloatBarrier
+
+The manipulability index $w$ remained well above the singularity 
+threshold $\epsilon = 0.01$ throughout the entire trajectory, ranging 
+from approximately $0.8$ at the start to a peak of $1.8$ at mid-trajectory, 
+then returning to approximately $0.8$ at the end. The DLS damping 
+coefficient $\lambda$ was zero for all 252 timesteps, confirming that no 
+singular or near-singular configurations were encountered:
+\[
+\text{Singularity events: } 0 \text{ / } 252 \text{ timesteps.}
+\]
+The variation in $w$ over the trajectory reflects the changing arm 
+geometry as it sweeps around the cylinder --- the arm is better conditioned 
+when extended outward (mid-trajectory) than when pointing toward the near 
+or far sides of the seam. Importantly, $w$ never drops close to the 
+threshold, which means the DLS damping mechanism was never needed. This 
+indicates that the chosen base offset $b_x = 1.2~\text{m}$ and joint 
+configuration kept the arm in well-conditioned poses throughout.
+
+\subsection{Summary}
+
+The modified JetArm successfully completed the full welding task with:
+\begin{itemize}
+    \item Full $2\pi$ seam traced with no interruption
+    \item Maximum position error of $75~\text{mm}$ at $t=0$, converging 
+    to under $5~\text{mm}$ within $2~\text{s}$
+    \item Maximum Z deviation of $16.5~\text{mm}$ during initial transient
+    \item Zero singularity events across all 252 timesteps
+    \item No joint limit violations
+    \item Smooth joint trajectories with no abrupt velocity changes
+\end{itemize}
+
+The initial transient error is a direct consequence of the initial 
+configuration search not enforcing exact position at $\mathbf{q}_0$ --- 
+the feedback correction term handles the convergence instead. This is an 
+acceptable trade-off: requiring exact initialisation would demand a 
+config-specific analytical IK, while the current approach remains 
+configuration-agnostic and converges reliably within the first few seconds.
+
+\section{Challenges and Limitations}
+
+\subsection{Challenges Encountered}
+
+
+\paragraph{End-Effector Drift}
+The original IK loop was purely velocity-tracking with no position feedback. 
+Small integration errors from the forward Euler scheme accumulated over 
+time, causing the end-effector to drift progressively off the seam. This 
+is visible in Figure~\ref{fig:challenge1}, where the Z axis deviates 
+significantly from $h_t = 1.0~\text{m}$ and the total error grows to 
+over $700~\text{mm}$ mid-trajectory. The fix was to add a proportional 
+feedback correction term $k_p(\mathbf{p}_{\text{des}} - \mathbf{p}_{ee})$ 
+to the velocity command at each timestep, which actively pulled the 
+end-effector back toward the seam and reduced steady-state error to 
+under $5~\text{mm}$.
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=0.95\linewidth]{challenge_2.png}
+    \caption{Failed tracking run before drift correction was added. 
+    The Z axis deviates significantly from $h_t = 1.0~\text{m}$ and 
+    the total position error exceeds $700~\text{mm}$ mid-trajectory.}
+    \label{fig:challenge1}
+\end{figure}
+\FloatBarrier
+
+
+
+\subsection{Limitations of the Approach}
+
+\paragraph{Position-Only IK}
+The IK solver uses only the linear velocity rows of the Jacobian 
+($\mathbf{J}_v$), so end-effector orientation is never actively 
+controlled. The welding tool orientation at any given timestep is 
+whatever forward kinematics happens to give at the current joint 
+configuration, and is not guaranteed to match the desired tool-down 
+orientation $\mathbf{R}_{\text{tool}}$. For a real welding application, 
+incorrect tool orientation would produce a defective weld. A full 6-DOF 
+task-space controller using the complete Jacobian would be required to 
+enforce both position and orientation simultaneously.
+
+\paragraph{Forward Euler Integration}
+Joint positions are updated using forward Euler, which is the simplest 
+but least accurate integration scheme. It introduces truncation error at 
+each timestep, which the proportional feedback term compensates for but 
+does not eliminate. A higher-order integration scheme such as Runge-Kutta 
+would reduce integration error without requiring feedback correction.
+
+\paragraph{Kinematic Redundancy Not Exploited}
+The modified JetArm has 6 active joints controlling 3 task-space 
+coordinates, leaving a 3-dimensional null space. The DLS pseudoinverse 
+resolves this by finding the minimum-norm joint velocity solution, which 
+minimises joint motion but makes no attempt to use the redundancy 
+productively --- for example, to avoid self-collision, optimise 
+manipulability, or keep joints away from their limits. In the current 
+implementation the wrist roll joint ($q_6$) is effectively frozen 
+throughout the trajectory at whatever value the initial configuration 
+happened to give it. Null-space control techniques such as the 
+gradient projection method could be used to exploit this redundancy.
+
+\paragraph{No Self-Collision Detection}
+The simulation has no collision checking. The arm's minimum-norm posture 
+resolution occasionally results in configurations where links are 
+geometrically close to or intersecting each other. In a physical 
+deployment, a collision-aware motion planner would be required.
+
+\section{Conclusion}
+
+A modular, configuration-agnostic Jacobian IK framework was implemented 
+for robotic welding path tracking. The system builds robot models 
+dynamically from Modified DH parameters, computes the geometric Jacobian 
+from first principles at each timestep, and resolves joint velocities via 
+DLS pseudoinverse with adaptive singularity damping and proportional drift 
+correction.
+
+The modified JetArm (PRRRRR) configuration demonstrated reliable full-seam 
+tracking with sub-5mm steady-state error and zero singularity events, 
+validating the control architecture. The initial tracking transient 
+($\sim 75~\text{mm}$) highlights the dependency on initialisation quality, 
+and motivates future work on tighter initial configuration constraints or 
+a warm-start analytical solution for the first timestep.
+
+
+
+\end{document}
