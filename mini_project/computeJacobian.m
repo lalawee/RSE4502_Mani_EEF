@@ -1,7 +1,6 @@
 function J = computeJacobian(DH_table, q, jointTypes)
 % computeJacobian
-% Computes the geometric Jacobian from first principles via velocity
-% propagation. Works for any combination of revolute and prismatic joints.
+
 %
 % Inputs:
 %   DH_table   - nx4 numeric matrix [alpha_deg, a_m, d_m, theta_offset_deg]
